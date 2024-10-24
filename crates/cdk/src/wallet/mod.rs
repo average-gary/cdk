@@ -14,15 +14,16 @@ use tracing::instrument;
 
 use crate::amount::SplitTarget;
 use crate::cdk_database::{self, WalletDatabase};
-use crate::dhke::{construct_proofs, hash_to_curve};
+use crate::dhke::{blind_message, construct_proofs, hash_to_curve};
 use crate::mint_url::MintUrl;
 use crate::nuts::nut00::token::Token;
 use crate::nuts::{
-    nut10, nut12, Conditions, CurrencyUnit, Id, KeySetInfo, Keys, Kind, MeltQuoteBolt11Response,
-    MeltQuoteState, MintInfo, MintQuoteBolt11Response, MintQuoteState, PreMintSecrets, PreSwap,
-    Proof, ProofState, Proofs, PublicKey, RestoreRequest, SecretKey, SigFlag, SpendingConditions,
-    State, SwapRequest,
+    nut10, nut12, BlindedMessage, Conditions, CurrencyUnit, Id, KeySetInfo, Keys, Kind,
+    MeltQuoteBolt11Response, MeltQuoteState, MintInfo, MintQuoteBolt11Response, MintQuoteState,
+    PreMint, PreMintSecrets, PreSwap, Proof, ProofState, Proofs, PublicKey, RestoreRequest,
+    SecretKey, SigFlag, SpendingConditions, State, SwapRequest,
 };
+use crate::secret::Secret;
 use crate::types::{Melted, ProofInfo};
 use crate::util::{hex, unix_time};
 use crate::{Amount, Bolt11Invoice, HttpClient, SECP256K1};
@@ -592,30 +593,31 @@ impl Wallet {
     /// fails.
     ///
     /// ```
-    pub fn generate_premint_secrets(
-        &self,
-        active_keyset_id: Id,
-        quote_info_amount: Amount,
-        amount_split_target: &SplitTarget,
-        spending_conditions: Option<&SpendingConditions>,
-        count: u32,
-    ) -> Result<PreMintSecrets, Error> {
-        // Move the match logic into this function.
-        match spending_conditions {
-            Some(spending_conditions) => Ok(PreMintSecrets::with_conditions(
-                active_keyset_id,
-                quote_info_amount,
-                amount_split_target,
-                spending_conditions,
-            )?),
-            None => Ok(PreMintSecrets::from_xpriv(
-                active_keyset_id,
-                count,
-                self.xpriv,
-                quote_info_amount,
-                amount_split_target,
-            )?),
-        }
+    pub fn generate_premint_secret(&self, count: u32) -> Result<PreMint, Error> {
+        let amount = Amount::ONE;
+        let secret = Secret::generate();
+        let keyset_id = Id::from_u64(0).unwrap();
+        let blinding_factor = SecretKey::from_xpriv(self.xpriv, keyset_id, count)?;
+
+        let (blinded, r) = blind_message(&secret.to_bytes(), Some(blinding_factor))?;
+
+        // (secret = x, blinded = B_)
+        let blinded_message = BlindedMessage::new(amount, keyset_id, blinded);
+
+        Ok(PreMint {
+            blinded_message,
+            secret,
+            r,
+            amount,
+        })
+    }
+
+    /// docs
+    pub fn get_keyset_count(&self) -> Result<u64, Error> {
+        let counter = self
+            .localstore
+            .get_keyset_counter(Id::from_u64(0).unwrap())
+            .await?;
     }
 
     /// Mint

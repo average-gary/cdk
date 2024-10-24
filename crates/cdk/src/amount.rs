@@ -17,6 +17,7 @@ pub struct Amount(u64);
 impl Amount {
     /// Amount zero
     pub const ZERO: Amount = Amount(0);
+    pub const ONE: Amount = Amount(1);
 
     /// Split into parts that are powers of two
     pub fn split(&self) -> Vec<Self> {
