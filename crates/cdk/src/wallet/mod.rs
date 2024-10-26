@@ -593,6 +593,33 @@ impl Wallet {
     /// fails.
     ///
     /// ```
+    pub fn generate_premint_secrets(
+        &self,
+        active_keyset_id: Id,
+        quote_info_amount: Amount,
+        amount_split_target: &SplitTarget,
+        spending_conditions: Option<&SpendingConditions>,
+        count: u32,
+    ) -> Result<PreMintSecrets, Error> {
+        // Move the match logic into this function.
+        match spending_conditions {
+            Some(spending_conditions) => Ok(PreMintSecrets::with_conditions(
+                active_keyset_id,
+                quote_info_amount,
+                amount_split_target,
+                spending_conditions,
+            )?),
+            None => Ok(PreMintSecrets::from_xpriv(
+                active_keyset_id,
+                count,
+                self.xpriv,
+                quote_info_amount,
+                amount_split_target,
+            )?),
+        }
+    }
+
+    /// just one secret
     pub fn generate_premint_secret(&self, count: u32) -> Result<PreMint, Error> {
         let amount = Amount::ONE;
         let secret = Secret::generate();
@@ -603,7 +630,6 @@ impl Wallet {
 
         // (secret = x, blinded = B_)
         let blinded_message = BlindedMessage::new(amount, keyset_id, blinded);
-
         Ok(PreMint {
             blinded_message,
             secret,
@@ -613,11 +639,24 @@ impl Wallet {
     }
 
     /// docs
-    pub fn get_keyset_count(&self) -> Result<u64, Error> {
+    pub async fn get_keyset_count(&self) -> Result<u32, Error> {
         let counter = self
             .localstore
-            .get_keyset_counter(Id::from_u64(0).unwrap())
+            .get_keyset_counter(&Id::from_u64(0).unwrap())
             .await?;
+        Ok(counter.unwrap())
+    }
+
+    /// docs
+    pub async fn increment_keyset_count_by_one(&self) -> Result<(), Error> {
+        let increment = self
+            .localstore
+            .increment_keyset_counter(&Id::from_u64(0).unwrap(), 1)
+            .await;
+        match increment {
+            Ok(_) => Ok(()),
+            Err(_) => todo!(),
+        }
     }
 
     /// Mint
