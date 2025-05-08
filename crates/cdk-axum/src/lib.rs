@@ -6,6 +6,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use axum::http::HeaderValue;
+use tower_http::cors::{Any, CorsLayer};
 use axum::routing::{get, post};
 use axum::Router;
 use cache::HttpCache;
@@ -168,8 +170,13 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
         .route("/restore", post(post_restore));
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_headers(Any)
+        .allow_methods(Any);
 
-    let mint_router = Router::new().nest("/v1", v1_router).with_state(state);
+
+    let mint_router = Router::new().nest("/v1", v1_router).with_state(state).layer(cors);
 
     Ok(mint_router)
 }
