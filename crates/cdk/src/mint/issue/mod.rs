@@ -376,6 +376,44 @@ impl Mint {
         result
     }
 
+    /// Gets all mint quotes for a specific pubkey
+    ///
+    /// Returns all quotes from the database where the pubkey matches the provided key.
+    /// This is useful for eHash HTTP API authentication where users need to discover
+    /// their quotes by proving pubkey ownership.
+    ///
+    /// # Arguments
+    /// * `pubkey` - The public key to filter quotes by
+    ///
+    /// # Returns
+    /// * `Ok(Vec<MintQuote>)` containing all matching quotes
+    /// * `Error` if database access fails
+    #[instrument(skip_all)]
+    pub async fn get_mint_quotes_by_pubkey(
+        &self,
+        pubkey: &PublicKey,
+    ) -> Result<Vec<MintQuote>, Error> {
+        #[cfg(feature = "prometheus")]
+        METRICS.inc_in_flight_requests("get_mint_quotes_by_pubkey");
+
+        let result = async {
+            let quotes = self.localstore.get_mint_quotes_by_pubkey(pubkey).await?;
+            Ok(quotes)
+        }
+        .await;
+
+        #[cfg(feature = "prometheus")]
+        {
+            METRICS.dec_in_flight_requests("get_mint_quotes_by_pubkey");
+            METRICS.record_mint_operation("get_mint_quotes_by_pubkey", result.is_ok());
+            if result.is_err() {
+                METRICS.record_error();
+            }
+        }
+
+        result
+    }
+
     /// Removes a mint quote from the database
     ///
     /// # Arguments

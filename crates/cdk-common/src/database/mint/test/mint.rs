@@ -404,3 +404,129 @@ where
         .await
         .is_err());
 }
+
+/// Test get_mint_quotes_by_pubkey filters correctly
+pub async fn get_mint_quotes_by_pubkey<DB>(db: DB)
+where
+    DB: Database<Error> + KeysDatabase<Err = Error>,
+{
+    use cashu::SecretKey;
+    use std::str::FromStr;
+
+    // Create two different pubkeys
+    let secret_key_1 = SecretKey::from_str(
+        "0000000000000000000000000000000000000000000000000000000000000001",
+    )
+    .unwrap();
+    let pubkey_1 = secret_key_1.public_key();
+
+    let secret_key_2 = SecretKey::from_str(
+        "0000000000000000000000000000000000000000000000000000000000000002",
+    )
+    .unwrap();
+    let pubkey_2 = secret_key_2.public_key();
+
+    // Create quote with pubkey_1
+    let mint_quote_1 = MintQuote::new(
+        None,
+        "".to_owned(),
+        cashu::CurrencyUnit::Sat,
+        None,
+        0,
+        PaymentIdentifier::CustomId(unique_string()),
+        Some(pubkey_1),
+        0.into(),
+        0.into(),
+        cashu::PaymentMethod::Bolt12,
+        0,
+        vec![],
+        vec![],
+    );
+
+    // Create another quote with pubkey_1
+    let mint_quote_2 = MintQuote::new(
+        None,
+        "".to_owned(),
+        cashu::CurrencyUnit::Sat,
+        None,
+        0,
+        PaymentIdentifier::CustomId(unique_string()),
+        Some(pubkey_1),
+        0.into(),
+        0.into(),
+        cashu::PaymentMethod::Bolt12,
+        0,
+        vec![],
+        vec![],
+    );
+
+    // Create quote with pubkey_2
+    let mint_quote_3 = MintQuote::new(
+        None,
+        "".to_owned(),
+        cashu::CurrencyUnit::Sat,
+        None,
+        0,
+        PaymentIdentifier::CustomId(unique_string()),
+        Some(pubkey_2),
+        0.into(),
+        0.into(),
+        cashu::PaymentMethod::Bolt12,
+        0,
+        vec![],
+        vec![],
+    );
+
+    // Create quote with no pubkey
+    let mint_quote_4 = MintQuote::new(
+        None,
+        "".to_owned(),
+        cashu::CurrencyUnit::Sat,
+        None,
+        0,
+        PaymentIdentifier::CustomId(unique_string()),
+        None,
+        0.into(),
+        0.into(),
+        cashu::PaymentMethod::Bolt12,
+        0,
+        vec![],
+        vec![],
+    );
+
+    // Add all quotes
+    let mut tx = Database::begin_transaction(&db).await.unwrap();
+    tx.add_mint_quote(mint_quote_1.clone()).await.unwrap();
+    tx.add_mint_quote(mint_quote_2.clone()).await.unwrap();
+    tx.add_mint_quote(mint_quote_3.clone()).await.unwrap();
+    tx.add_mint_quote(mint_quote_4.clone()).await.unwrap();
+    tx.commit().await.unwrap();
+
+    // Query by pubkey_1 - should return 2 quotes
+    let quotes_for_pubkey_1 = db.get_mint_quotes_by_pubkey(&pubkey_1).await.unwrap();
+    assert_eq!(quotes_for_pubkey_1.len(), 2);
+    assert!(quotes_for_pubkey_1
+        .iter()
+        .all(|q| q.pubkey == Some(pubkey_1)));
+    assert!(quotes_for_pubkey_1
+        .iter()
+        .any(|q| q.id == mint_quote_1.id));
+    assert!(quotes_for_pubkey_1
+        .iter()
+        .any(|q| q.id == mint_quote_2.id));
+
+    // Query by pubkey_2 - should return 1 quote
+    let quotes_for_pubkey_2 = db.get_mint_quotes_by_pubkey(&pubkey_2).await.unwrap();
+    assert_eq!(quotes_for_pubkey_2.len(), 1);
+    assert_eq!(quotes_for_pubkey_2[0].pubkey, Some(pubkey_2));
+    assert_eq!(quotes_for_pubkey_2[0].id, mint_quote_3.id);
+
+    // Query by a pubkey that has no quotes - should return empty vec
+    let secret_key_3 = SecretKey::from_str(
+        "0000000000000000000000000000000000000000000000000000000000000003",
+    )
+    .unwrap();
+    let pubkey_3 = secret_key_3.public_key();
+    let quotes_for_pubkey_3 = db.get_mint_quotes_by_pubkey(&pubkey_3).await.unwrap();
+    assert_eq!(quotes_for_pubkey_3.len(), 0);
+}

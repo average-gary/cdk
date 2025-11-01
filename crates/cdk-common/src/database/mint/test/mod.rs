@@ -235,7 +235,8 @@ macro_rules! mint_db_test {
             reject_over_issue_same_tx,
             reject_over_issue_different_tx,
             reject_over_issue_with_payment,
-            reject_over_issue_with_payment_different_tx
+            reject_over_issue_with_payment_different_tx,
+            get_mint_quotes_by_pubkey
         );
     };
     ($make_db_fn:ident, $($name:ident),+ $(,)?) => {
