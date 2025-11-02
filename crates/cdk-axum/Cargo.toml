@@ -19,6 +19,7 @@ prometheus = ["dep:cdk-prometheus"]
 anyhow.workspace = true
 async-trait.workspace = true
 axum = { workspace = true, features = ["ws"] }
+bitcoin.workspace = true
 cdk = { workspace = true, features = [
     "mint",
 ]}

@@ -25,6 +25,7 @@ mod bolt12_router;
 pub mod cache;
 mod router_handlers;
 mod ws;
+pub mod nut20_extension;
 
 #[cfg(feature = "swagger")]
 mod swagger_imports {
@@ -68,6 +69,12 @@ pub struct MintState {
     mint: Arc<Mint>,
     cache: Arc<cache::HttpCache>,
 }
+
+// Re-export NUT-20 extension types for external use
+pub use nut20_extension::{
+    get_quotes_by_pubkey, mint_ehash_tokens, EHashQuoteSummary, PostMintEHashRequest,
+    PostMintEHashResponse, QuotesByPubkeyRequest, QuotesByPubkeyResponse,
+};
 
 #[cfg(feature = "swagger")]
 macro_rules! define_api_doc {
