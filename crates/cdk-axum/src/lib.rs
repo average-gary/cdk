@@ -104,7 +104,9 @@ macro_rules! define_api_doc {
                 post_melt_bolt11,
                 post_swap,
                 post_check,
-                post_restore
+                post_restore,
+                get_quotes_by_pubkey,
+                mint_ehash_tokens
                 $(,$($path,)*)?
                 $(,$($auth_path,)*)?
             )
@@ -166,7 +168,12 @@ define_api_doc! {
         Witness,
         nut04::Settings,
         nut05::Settings,
-        nut15::Settings
+        nut15::Settings,
+        QuotesByPubkeyRequest,
+        QuotesByPubkeyResponse,
+        EHashQuoteSummary,
+        PostMintEHashRequest,
+        PostMintEHashResponse
     ]
 }
 
@@ -222,7 +229,12 @@ define_api_doc! {
         Witness,
         nut04::Settings,
         nut05::Settings,
-        nut15::Settings
+        nut15::Settings,
+        QuotesByPubkeyRequest,
+        QuotesByPubkeyResponse,
+        EHashQuoteSummary,
+        PostMintEHashRequest,
+        PostMintEHashResponse
     ],
     auth_schemas: [MintAuthRequest],
     auth_paths: [
@@ -304,6 +316,8 @@ pub async fn create_mint_router_with_custom_cache(
             get(get_check_mint_bolt11_quote),
         )
         .route("/mint/bolt11", post(cache_post_mint_bolt11))
+        .route("/mint/quotes/by-pubkey", post(get_quotes_by_pubkey))
+        .route("/mint/ehash", post(mint_ehash_tokens))
         .route("/melt/quote/bolt11", post(post_melt_bolt11_quote))
         .route("/ws", get(ws_handler))
         .route(

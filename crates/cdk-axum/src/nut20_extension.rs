@@ -169,6 +169,18 @@ fn verify_get_quotes_signature(pubkey: &PublicKey, signature_str: &str) -> Resul
     Ok(())
 }
 
+#[cfg_attr(feature = "swagger", utoipa::path(
+    post,
+    context_path = "/v1",
+    path = "/mint/quotes/by-pubkey",
+    request_body = QuotesByPubkeyRequest,
+    responses(
+        (status = 200, description = "Successful response", body = QuotesByPubkeyResponse, content_type = "application/json"),
+        (status = 400, description = "Invalid pubkey format or signature format", body = ErrorResponse, content_type = "application/json"),
+        (status = 401, description = "Signature verification failed", body = ErrorResponse, content_type = "application/json"),
+        (status = 500, description = "Database query failed", body = ErrorResponse, content_type = "application/json")
+    )
+))]
 /// Handler for POST /v1/mint/quotes/by-pubkey
 ///
 /// Authenticated quote discovery endpoint that returns all PAID quotes
@@ -245,6 +257,20 @@ pub async fn get_quotes_by_pubkey(
     }))
 }
 
+#[cfg_attr(feature = "swagger", utoipa::path(
+    post,
+    context_path = "/v1",
+    path = "/mint/ehash",
+    request_body = PostMintEHashRequest,
+    responses(
+        (status = 200, description = "Successful response", body = PostMintEHashResponse, content_type = "application/json"),
+        (status = 400, description = "Invalid quote ID or request format", body = ErrorResponse, content_type = "application/json"),
+        (status = 401, description = "Signature verification failed or missing", body = ErrorResponse, content_type = "application/json"),
+        (status = 404, description = "Quote doesn't exist", body = ErrorResponse, content_type = "application/json"),
+        (status = 409, description = "Quote not in PAID state", body = ErrorResponse, content_type = "application/json"),
+        (status = 500, description = "Minting operation failed", body = ErrorResponse, content_type = "application/json")
+    )
+))]
 /// Handler for POST /v1/mint/ehash
 ///
 /// eHash-specific minting endpoint that verifies NUT-20 signature matches
