@@ -98,6 +98,10 @@ enum Commands {
     CatLogin(sub_commands::cat_login::CatLoginSubCommand),
     /// Cat login with device code flow
     CatDeviceLogin(sub_commands::cat_device_login::CatDeviceLoginSubCommand),
+    /// Get quotes by pubkey (eHash NUT-20 extension)
+    GetQuotesByPubkey(sub_commands::get_quotes_by_pubkey::GetQuotesByPubkeySubCommand),
+    /// Mint eHash tokens (eHash NUT-20 extension)
+    MintEHash(sub_commands::mint_ehash::MintEHashSubCommand),
 }
 
 #[tokio::main]
@@ -266,6 +270,12 @@ async fn main() -> Result<()> {
                 &work_dir,
             )
             .await
+        }
+        Commands::GetQuotesByPubkey(sub_command_args) => {
+            sub_commands::get_quotes_by_pubkey::get_quotes_by_pubkey(sub_command_args).await
+        }
+        Commands::MintEHash(sub_command_args) => {
+            sub_commands::mint_ehash::mint_ehash(&multi_mint_wallet, sub_command_args).await
         }
     }
 }
