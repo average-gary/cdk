@@ -102,6 +102,8 @@ enum Commands {
     GetQuotesByPubkey(sub_commands::get_quotes_by_pubkey::GetQuotesByPubkeySubCommand),
     /// Mint eHash tokens (eHash NUT-20 extension)
     MintEHash(sub_commands::mint_ehash::MintEHashSubCommand),
+    /// Show hpub for eHash mining (generate new keypair or convert existing private key)
+    ShowHpub(sub_commands::show_hpub::ShowHpubSubCommand),
 }
 
 #[tokio::main]
@@ -276,6 +278,9 @@ async fn main() -> Result<()> {
         }
         Commands::MintEHash(sub_command_args) => {
             sub_commands::mint_ehash::mint_ehash(&multi_mint_wallet, sub_command_args).await
+        }
+        Commands::ShowHpub(sub_command_args) => {
+            sub_commands::show_hpub::show_hpub(&seed, sub_command_args).await
         }
     }
 }
