@@ -39,12 +39,19 @@ pub async fn mint_ehash(
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_hex = public_key.to_string();
 
-    // Get the mint quote from local storage
-    let quote = wallet
-        .localstore
-        .get_mint_quote(&sub_command_args.quote_id)
-        .await?
-        .ok_or(anyhow!("Quote not found in local storage"))?;
+    // Fetch the quote from the mint server via HTTP API
+    // (eHash quotes are created server-side, not in wallet local storage)
+    let client = reqwest::Client::new();
+    let quote_url = format!("{}/v1/mint/quote/bolt11/{}", mint_url, sub_command_args.quote_id);
+
+    println!("Fetching quote from mint: {}", quote_url);
+    let response = client.get(&quote_url).send().await?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to fetch quote from mint: {}", response.status()));
+    }
+
+    let quote: cdk_common::mint::MintQuote = response.json().await?;
 
     println!("Quote: {:#?}", quote);
 
