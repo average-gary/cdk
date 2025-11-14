@@ -5,10 +5,12 @@ use clap::Args;
 
 #[derive(Args)]
 pub struct ShowHpubSubCommand {
-    /// Derivation index (default: 0, use different values for multiple mining identities)
-    #[arg(short, long, default_value = "0")]
-    index: u32,
+    // No arguments - uses hardcoded eHash derivation index
 }
+
+/// Hardcoded eHash derivation index
+/// This separates eHash keys from normal Cashu wallet operations
+const EHASH_DERIVATION_INDEX: u32 = 0;
 
 /// Encode a secp256k1 public key to hpub format (bech32m)
 fn encode_hpub(pubkey: &PublicKey) -> Result<String> {
@@ -49,11 +51,11 @@ fn derive_ehash_key_from_seed(seed: &[u8], index: u32) -> Result<SecretKey> {
     Ok(secret_key)
 }
 
-pub async fn show_hpub(seed: &[u8; 64], sub_command_args: &ShowHpubSubCommand) -> Result<()> {
+pub async fn show_hpub(seed: &[u8; 64], _sub_command_args: &ShowHpubSubCommand) -> Result<()> {
     let secp = Secp256k1::new();
 
-    // Derive secret key from wallet seed
-    let secret_key = derive_ehash_key_from_seed(seed, sub_command_args.index)?;
+    // Derive secret key from wallet seed using hardcoded eHash index
+    let secret_key = derive_ehash_key_from_seed(seed, EHASH_DERIVATION_INDEX)?;
 
     // Derive public key
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
@@ -63,10 +65,10 @@ pub async fn show_hpub(seed: &[u8; 64], sub_command_args: &ShowHpubSubCommand) -
 
     // Print results
     println!("═══════════════════════════════════════════════");
-    println!("  eHash Mining Identity (Index: {})", sub_command_args.index);
+    println!("  eHash Mining Identity");
     println!("═══════════════════════════════════════════════");
     println!();
-    println!("Derived from wallet seed using index: {}", sub_command_args.index);
+    println!("Derived from wallet seed (eHash derivation path)");
     println!();
 
     println!("Public Key (hex):");
@@ -82,14 +84,8 @@ pub async fn show_hpub(seed: &[u8; 64], sub_command_args: &ShowHpubSubCommand) -
     println!("  - Pool config: default_locking_pubkey = \"{}\"", hpub);
     println!();
     println!("Query and redeem eHash:");
-    println!("  cdk-cli get-quotes-by-pubkey <MINT_URL> --index {}", sub_command_args.index);
-    println!("  cdk-cli mint-e-hash <MINT_URL> <QUOTE_ID> --index {}", sub_command_args.index);
-    println!();
-
-    if sub_command_args.index == 0 {
-        println!("💡 TIP: Use --index <N> to generate multiple mining identities");
-        println!("   Example: cdk-cli show-hpub --index 1");
-    }
+    println!("  cdk-cli get-quotes-by-pubkey <MINT_URL>");
+    println!("  cdk-cli mint-e-hash <MINT_URL> <QUOTE_ID>");
 
     Ok(())
 }

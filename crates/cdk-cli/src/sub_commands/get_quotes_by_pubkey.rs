@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use anyhow::Result;
 use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use bitcoin::hashes::{sha256, Hash};
@@ -8,13 +6,34 @@ use clap::Args;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+/// Hardcoded eHash derivation index (matches show-hpub)
+/// This separates eHash keys from normal Cashu wallet operations
+const EHASH_DERIVATION_INDEX: u32 = 0;
+
+/// Derive an eHash keypair from seed (same logic as show_hpub)
+fn derive_ehash_key_from_seed(seed: &[u8], index: u32) -> Result<SecretKey> {
+    use bitcoin::hashes::{sha256, Hash, HashEngine};
+
+    // Create a deterministic key using HMAC-SHA256
+    // Domain: "ehash-mining-key"
+    // Data: seed || index
+    let mut engine = sha256::Hash::engine();
+    engine.input(b"ehash-mining-key");
+    engine.input(seed);
+    engine.input(&index.to_le_bytes());
+    let hash = sha256::Hash::from_engine(engine);
+
+    // Use the hash as the secret key
+    let secret_key = SecretKey::from_slice(hash.as_ref())
+        .map_err(|e| anyhow::anyhow!("Failed to derive key: {}", e))?;
+
+    Ok(secret_key)
+}
+
 #[derive(Args, Serialize, Deserialize)]
 pub struct GetQuotesByPubkeySubCommand {
     /// Mint URL
     mint_url: MintUrl,
-    /// Private key (hex) to sign the request
-    #[arg(short, long)]
-    private_key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,11 +58,11 @@ struct QuotesByPubkeyResponse {
     quotes: Vec<EHashQuoteSummary>,
 }
 
-pub async fn get_quotes_by_pubkey(sub_command_args: &GetQuotesByPubkeySubCommand) -> Result<()> {
+pub async fn get_quotes_by_pubkey(seed: &[u8; 64], sub_command_args: &GetQuotesByPubkeySubCommand) -> Result<()> {
     let secp = Secp256k1::new();
 
-    // Parse private key
-    let secret_key = SecretKey::from_str(&sub_command_args.private_key)?;
+    // Derive eHash key from wallet seed using hardcoded index
+    let secret_key = derive_ehash_key_from_seed(seed, EHASH_DERIVATION_INDEX)?;
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_hex = public_key.to_string();
 

@@ -274,10 +274,10 @@ async fn main() -> Result<()> {
             .await
         }
         Commands::GetQuotesByPubkey(sub_command_args) => {
-            sub_commands::get_quotes_by_pubkey::get_quotes_by_pubkey(sub_command_args).await
+            sub_commands::get_quotes_by_pubkey::get_quotes_by_pubkey(&seed, sub_command_args).await
         }
         Commands::MintEHash(sub_command_args) => {
-            sub_commands::mint_ehash::mint_ehash(&multi_mint_wallet, sub_command_args).await
+            sub_commands::mint_ehash::mint_ehash(&seed, &multi_mint_wallet, sub_command_args).await
         }
         Commands::ShowHpub(sub_command_args) => {
             sub_commands::show_hpub::show_hpub(&seed, sub_command_args).await
