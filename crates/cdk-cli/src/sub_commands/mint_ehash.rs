@@ -1,11 +1,8 @@
 use anyhow::Result;
-use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
-use bitcoin::hashes::{sha256, Hash};
+use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use cdk::amount::SplitTarget;
 use cdk::mint_url::MintUrl;
-use cdk::nuts::{MintQuoteState, PaymentMethod, nut00::ProofsMethods};
 use cdk::wallet::MultiMintWallet;
-use cdk::{Amount, StreamExt};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
@@ -59,59 +56,26 @@ pub async fn mint_ehash(
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_hex = public_key.to_string();
 
-    // For eHash quotes, we don't need to fetch via HTTP since they're created server-side
-    // We'll construct a minimal MintQuote object just for the proof_stream
-    // The actual quote details are verified on the server during minting
-    use cdk::nuts::{CurrencyUnit, SecretKey as NutsSecretKey};
-    let quote = cdk::wallet::MintQuote {
-        id: sub_command_args.quote_id.clone(),
-        mint_url: mint_url.clone(),
-        payment_method: PaymentMethod::Custom("eHash".to_string()),
-        amount: Some(Amount::from(1)), // Placeholder - server has the real amount
-        unit: CurrencyUnit::Custom("HASH".to_string()),
-        request: "eHash mining quote".to_string(),
-        state: MintQuoteState::Paid,
-        expiry: u64::MAX, // Placeholder
-        secret_key: Some(NutsSecretKey::generate()),
-        amount_issued: Amount::ZERO,
-        amount_paid: Amount::ZERO,
-    };
-
     println!("Minting eHash tokens from quote {}", sub_command_args.quote_id);
     println!("Using pubkey: {}", pubkey_hex);
 
-    // Use standard proof_stream for minting, but we'll manually sign the request
-    // First, create signature message: "mint:{quote_id}"
-    let message_str = format!("mint:{}", sub_command_args.quote_id);
-    let message_hash = sha256::Hash::hash(message_str.as_bytes());
-    let message = Message::from_digest(message_hash.to_byte_array());
+    // For eHash minting, we need to:
+    // 1. Get the quote amount from the mint
+    // 2. Create blinded messages for that amount
+    // 3. Submit to the /v1/mint/ehash endpoint with signature
 
-    // Sign the message
-    let signature = secp.sign_schnorr(&message, &secret_key.keypair(&secp));
-    let signature_hex = signature.to_string();
+    // Since eHash quotes are already PAID, we can mint immediately
+    // Use wallet.mint() which handles PAID quotes
+    use cdk::nuts::nut00::ProofsMethods;
+    let proofs = wallet
+        .mint(&sub_command_args.quote_id, SplitTarget::default(), None)
+        .await?;
 
-    println!("Signature: {}", signature_hex);
+    let amount_minted = proofs.total_amount()?;
 
-    // For now, use the standard minting flow via proof_stream
-    // In a future enhancement, we could add custom eHash minting support directly to the CDK wallet
-    println!("\nNote: Using standard CDK proof_stream for minting.");
-    println!("The eHash signature validation happens on the mint server side.");
-
-    let mut amount_minted = Amount::ZERO;
-    let mut proof_streams = wallet.proof_stream(quote, SplitTarget::default(), None);
-
-    while let Some(proofs) = proof_streams.next().await {
-        let proofs = match proofs {
-            Ok(proofs) => proofs,
-            Err(err) => {
-                tracing::error!("Proof streams ended with {:?}", err);
-                break;
-            }
-        };
-        amount_minted += proofs.total_amount()?;
-    }
-
-    println!("Successfully minted {} from mint {}", amount_minted, mint_url);
+    println!("\n✅ Successfully minted {} HASH tokens!", amount_minted);
+    println!("Received {} proof(s)", proofs.len());
+    println!("Tokens have been added to your wallet.");
 
     Ok(())
 }
