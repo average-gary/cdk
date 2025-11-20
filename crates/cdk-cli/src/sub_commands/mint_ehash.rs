@@ -1,8 +1,11 @@
-use anyhow::Result;
-use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+use anyhow::{anyhow, Result};
+use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
+use bitcoin::hashes::{sha256, Hash};
 use cdk::amount::SplitTarget;
 use cdk::mint_url::MintUrl;
+use cdk::nuts::nut00::ProofsMethods;
 use cdk::wallet::MultiMintWallet;
+use cdk::{Amount, StreamExt};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
@@ -56,26 +59,106 @@ pub async fn mint_ehash(
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_hex = public_key.to_string();
 
-    println!("Minting eHash tokens from quote {}", sub_command_args.quote_id);
-    println!("Using pubkey: {}", pubkey_hex);
+    // eHash quotes are created server-side by the pool, so we need to fetch them from the mint
+    println!("Fetching quote from mint server...");
 
-    // For eHash minting, we need to:
-    // 1. Get the quote amount from the mint
-    // 2. Create blinded messages for that amount
-    // 3. Submit to the /v1/mint/ehash endpoint with signature
+    let client = reqwest::Client::new();
 
-    // Since eHash quotes are already PAID, we can mint immediately
-    // Use wallet.mint() which handles PAID quotes
-    use cdk::nuts::nut00::ProofsMethods;
-    let proofs = wallet
-        .mint(&sub_command_args.quote_id, SplitTarget::default(), None)
+    // Create signature for get_quotes request
+    let message_str = format!("get_quotes:{}", pubkey_hex);
+    let message_hash = sha256::Hash::hash(message_str.as_bytes());
+    let message = Message::from_digest(message_hash.to_byte_array());
+    let signature = secp.sign_schnorr(&message, &secret_key.keypair(&secp));
+
+    // Fetch quote from server via get-quotes-by-pubkey endpoint
+    #[derive(Serialize)]
+    struct QuotesRequest {
+        pubkey: String,
+        signature: String,
+    }
+
+    #[derive(Deserialize)]
+    struct QuotesResponse {
+        quotes: Vec<ServerQuote>,
+    }
+
+    #[derive(Deserialize)]
+    struct ServerQuote {
+        quote_id: String,
+        amount: u64,
+        unit: String,
+        state: String,
+    }
+
+    let url = format!("{}/v1/mint/quotes/by-pubkey", mint_url);
+    let response = client
+        .post(&url)
+        .json(&QuotesRequest {
+            pubkey: pubkey_hex.clone(),
+            signature: signature.to_string(),
+        })
+        .send()
         .await?;
 
-    let amount_minted = proofs.total_amount()?;
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to fetch quotes: {}", response.status()));
+    }
+
+    let quotes_response: QuotesResponse = response.json().await?;
+
+    // Find our specific quote
+    let server_quote = quotes_response
+        .quotes
+        .iter()
+        .find(|q| q.quote_id == sub_command_args.quote_id)
+        .ok_or_else(|| anyhow!("Quote {} not found on server", sub_command_args.quote_id))?;
+
+    println!("Found quote: {} {} (state: {})", server_quote.amount, server_quote.unit, server_quote.state);
+
+    // Create a MintQuote for proof_stream with Custom payment method
+    use cdk::nuts::{CurrencyUnit, MintQuoteState, PaymentMethod};
+    use std::str::FromStr;
+
+    let quote = cdk::wallet::MintQuote {
+        id: sub_command_args.quote_id.clone(),
+        mint_url: mint_url.clone(),
+        payment_method: PaymentMethod::Custom("HASH".to_string()),
+        amount: Some(Amount::from(server_quote.amount)),
+        unit: CurrencyUnit::from_str(&server_quote.unit)?,
+        request: "eHash mining quote".to_string(),
+        state: MintQuoteState::Paid,
+        expiry: unix_time() + 86400,
+        secret_key: None,
+        amount_issued: Amount::ZERO,
+        amount_paid: Amount::from(server_quote.amount),
+    };
+
+    println!("Minting {} {} from quote...", server_quote.amount, server_quote.unit);
+
+    // Use proof_stream which now supports Custom payment methods
+    let mut amount_minted = Amount::ZERO;
+    let mut proof_streams = wallet.proof_stream(quote, SplitTarget::default(), None);
+
+    while let Some(proofs) = proof_streams.next().await {
+        let proofs = match proofs {
+            Ok(proofs) => proofs,
+            Err(err) => {
+                tracing::error!("Proof streams ended with {:?}", err);
+                break;
+            }
+        };
+        amount_minted += proofs.total_amount()?;
+    }
 
     println!("\n✅ Successfully minted {} HASH tokens!", amount_minted);
-    println!("Received {} proof(s)", proofs.len());
     println!("Tokens have been added to your wallet.");
 
     Ok(())
+}
+
+fn unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }

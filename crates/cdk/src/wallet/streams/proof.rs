@@ -123,7 +123,14 @@ impl Stream for MultipleMintQuoteProofStream<'_> {
                                 )
                                 .await
                                 .map(|proofs| (mint_quote, proofs)),
-                            _ => Err(Error::UnsupportedPaymentMethod),
+                            PaymentMethod::Custom(_) => {
+                                // Custom payment methods (e.g., eHash) are already PAID server-side
+                                // Just mint directly without waiting for payment
+                                wallet
+                                    .mint(&mint_quote.id, amount_split_target, spending_conditions)
+                                    .await
+                                    .map(|proofs| (mint_quote, proofs))
+                            }
                         }
                     });
 
