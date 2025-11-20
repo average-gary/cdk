@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use bitcoin::hashes::{sha256, Hash};
 use cdk::amount::SplitTarget;
 use cdk::mint_url::MintUrl;
-use cdk::nuts::nut00::ProofsMethods;
+use cdk::nuts::{MintQuoteState, PaymentMethod, nut00::ProofsMethods};
 use cdk::wallet::MultiMintWallet;
 use cdk::{Amount, StreamExt};
 use clap::Args;
@@ -59,24 +59,25 @@ pub async fn mint_ehash(
     let public_key = PublicKey::from_secret_key(&secp, &secret_key);
     let pubkey_hex = public_key.to_string();
 
-    // Fetch the quote from the mint server via HTTP API
-    // (eHash quotes are created server-side, not in wallet local storage)
-    let client = reqwest::Client::new();
-    let quote_url = format!("{}/v1/mint/quote/bolt11/{}", mint_url, sub_command_args.quote_id);
+    // For eHash quotes, we don't need to fetch via HTTP since they're created server-side
+    // We'll construct a minimal MintQuote object just for the proof_stream
+    // The actual quote details are verified on the server during minting
+    use cdk::nuts::{CurrencyUnit, SecretKey as NutsSecretKey};
+    let quote = cdk::wallet::MintQuote {
+        id: sub_command_args.quote_id.clone(),
+        mint_url: mint_url.clone(),
+        payment_method: PaymentMethod::Custom("eHash".to_string()),
+        amount: Some(Amount::from(1)), // Placeholder - server has the real amount
+        unit: CurrencyUnit::Custom("HASH".to_string()),
+        request: "eHash mining quote".to_string(),
+        state: MintQuoteState::Paid,
+        expiry: u64::MAX, // Placeholder
+        secret_key: Some(NutsSecretKey::generate()),
+        amount_issued: Amount::ZERO,
+        amount_paid: Amount::ZERO,
+    };
 
-    println!("Fetching quote from mint: {}", quote_url);
-    let response = client.get(&quote_url).send().await?;
-
-    if !response.status().is_success() {
-        return Err(anyhow!("Failed to fetch quote from mint: {}", response.status()));
-    }
-
-    let quote: cdk::wallet::MintQuote = response.json().await?;
-
-    println!("Quote: {:#?}", quote);
-
-    let amount = quote.amount.ok_or(anyhow!("Quote has no amount"))?;
-    println!("Minting {} {} from quote {}", amount, quote.unit, quote.id);
+    println!("Minting eHash tokens from quote {}", sub_command_args.quote_id);
     println!("Using pubkey: {}", pubkey_hex);
 
     // Use standard proof_stream for minting, but we'll manually sign the request
