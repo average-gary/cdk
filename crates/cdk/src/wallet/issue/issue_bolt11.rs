@@ -105,9 +105,30 @@ impl Wallet {
         &self,
         quote_id: &str,
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
+        // First, check if this is a custom payment method (e.g., eHash)
+        // Custom payment methods don't have a bolt11 status endpoint
+        let local_quote = self.localstore.get_mint_quote(quote_id).await?;
+
+        if let Some(quote) = &local_quote {
+            if !matches!(quote.payment_method, PaymentMethod::Bolt11) {
+                // For custom payment methods, return the locally stored state
+                // These quotes are already marked as PAID when fetched from the server
+                return Ok(MintQuoteBolt11Response {
+                    quote: quote_id.to_string(),
+                    state: quote.state,
+                    expiry: Some(quote.expiry),
+                    request: quote.request.clone(),
+                    amount: quote.amount,
+                    unit: Some(quote.unit.clone()),
+                    pubkey: None,
+                });
+            }
+        }
+
+        // For Bolt11 quotes, check status from server
         let response = self.client.get_mint_quote_status(quote_id).await?;
 
-        match self.localstore.get_mint_quote(quote_id).await? {
+        match local_quote {
             Some(quote) => {
                 let mut quote = quote;
 
@@ -204,9 +225,8 @@ impl Wallet {
             .await?
             .ok_or(Error::UnknownQuote)?;
 
-        if quote_info.payment_method != PaymentMethod::Bolt11 {
-            return Err(Error::UnsupportedPaymentMethod);
-        }
+        // Support all payment methods - Bolt11, Bolt12, and Custom (e.g., eHash)
+        // The client.post_mint() will route to the correct endpoint based on payment_method
 
         let amount_mintable = quote_info.amount_mintable();
 
@@ -221,7 +241,15 @@ impl Wallet {
             tracing::warn!("Attempting to mint with expired quote.");
         }
 
-        let active_keyset_id = self.fetch_active_keyset().await?.id;
+        // Fetch active keyset for the quote's unit
+        // This is critical for multi-unit mints (e.g., sat + HASH)
+        let keysets = self.refresh_keysets().await?;
+        let active_keyset_id = keysets
+            .iter()
+            .filter(|k| k.active && k.unit == quote_info.unit)
+            .min_by_key(|k| k.input_fee_ppk)
+            .ok_or(Error::NoActiveKeyset)?
+            .id;
 
         let premint_secrets = match &spending_conditions {
             Some(spending_conditions) => PreMintSecrets::with_conditions(
@@ -269,7 +297,29 @@ impl Wallet {
             request.sign(secret_key)?;
         }
 
-        let mint_res = self.client.post_mint(request).await?;
+        // Route to the correct endpoint based on payment method
+        eprintln!("DEBUG: Payment method is: {:?}", quote_info.payment_method);
+        let mint_res = match quote_info.payment_method {
+            PaymentMethod::Bolt11 => {
+                eprintln!("DEBUG: Using Bolt11 endpoint");
+                self.client.post_mint(request).await?
+            }
+            PaymentMethod::Bolt12 => {
+                eprintln!("DEBUG: Using Bolt12 endpoint");
+                // For bolt12, we'd use a different endpoint, but for now fall back to standard
+                self.client.post_mint(request).await?
+            }
+            PaymentMethod::Custom(ref method_name) if method_name.eq_ignore_ascii_case("HASH") => {
+                eprintln!("DEBUG: Using eHash endpoint for method: {}", method_name);
+                // For eHash quotes, call the dedicated /v1/mint/ehash endpoint
+                self.client.post_mint_ehash(request).await?
+            }
+            PaymentMethod::Custom(ref method_name) => {
+                eprintln!("DEBUG: Using generic custom endpoint for method: {}", method_name);
+                // Generic custom payment methods use standard endpoint for now
+                self.client.post_mint(request).await?
+            }
+        };
 
         let keys = self.load_keyset_keys(active_keyset_id).await?;
 

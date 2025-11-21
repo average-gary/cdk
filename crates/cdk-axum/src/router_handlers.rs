@@ -214,7 +214,27 @@ pub(crate) async fn get_check_mint_bolt11_quote(
             into_response(err)
         })?;
 
-    Ok(Json(quote.try_into().map_err(into_response)?))
+    // Try to convert to Bolt11Response, but handle custom payment methods gracefully
+    match quote.try_into() {
+        Ok(response) => Ok(Json(response)),
+        Err(cdk::Error::InvalidPaymentMethod) => {
+            // For custom payment methods (e.g., eHash), this endpoint is not applicable
+            // Return 404 to indicate the quote should be checked via a different endpoint
+            tracing::warn!("Attempted to check non-Bolt11 quote {} via Bolt11 endpoint", quote_id);
+            Err((
+                axum::http::StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "detail": "Quote is not a Bolt11 quote. Use the appropriate endpoint for this payment method.",
+                    "code": 0
+                })),
+            )
+                .into_response())
+        }
+        Err(err) => {
+            tracing::error!("Could not convert quote {}: {}", quote_id, err);
+            Err(into_response(err))
+        }
+    }
 }
 
 #[instrument(skip_all)]

@@ -284,6 +284,20 @@ where
         .await
     }
 
+    /// Mint Tokens using eHash endpoint [NUT-20 Extension]
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
+    async fn post_mint_ehash(&self, request: MintRequest<String>) -> Result<MintResponse, Error> {
+        let url = self.mint_url.join_paths(&["v1", "mint", "ehash"])?;
+
+        #[cfg(feature = "auth")]
+        let auth_token = None; // eHash uses NUT-20 signatures, not NUT-21 auth
+
+        #[cfg(not(feature = "auth"))]
+        let auth_token = None;
+
+        self.transport.http_post(url, auth_token, &request).await
+    }
+
     /// Melt Quote [NUT-05]
     #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
     async fn post_melt_quote(

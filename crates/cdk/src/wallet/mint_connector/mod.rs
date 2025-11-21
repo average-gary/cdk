@@ -110,4 +110,11 @@ pub trait MintConnector: Debug {
         &self,
         request: MeltRequest<String>,
     ) -> Result<MeltQuoteBolt11Response<String>, Error>;
+
+    /// Mint tokens using eHash endpoint [NUT-20 Extension]
+    /// This endpoint is used for Custom payment method quotes with method="HASH"
+    async fn post_mint_ehash(
+        &self,
+        request: MintRequest<String>,
+    ) -> Result<MintResponse, Error>;
 }

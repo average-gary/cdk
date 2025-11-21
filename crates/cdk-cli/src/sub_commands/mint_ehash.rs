@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
+use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
-use bitcoin::hashes::{sha256, Hash};
 use cdk::amount::SplitTarget;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::nut00::ProofsMethods;
@@ -55,9 +55,12 @@ pub async fn mint_ehash(
     let secp = Secp256k1::new();
 
     // Derive eHash key from wallet seed using hardcoded index
-    let secret_key = derive_ehash_key_from_seed(seed, EHASH_DERIVATION_INDEX)?;
-    let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+    let secret_key_secp = derive_ehash_key_from_seed(seed, EHASH_DERIVATION_INDEX)?;
+    let public_key = PublicKey::from_secret_key(&secp, &secret_key_secp);
     let pubkey_hex = public_key.to_string();
+
+    // Convert to cdk::nuts::SecretKey for wallet use
+    let secret_key = cdk::nuts::SecretKey::from_slice(secret_key_secp.as_ref())?;
 
     // eHash quotes are created server-side by the pool, so we need to fetch them from the mint
     println!("Fetching quote from mint server...");
@@ -65,10 +68,11 @@ pub async fn mint_ehash(
     let client = reqwest::Client::new();
 
     // Create signature for get_quotes request
+    use bitcoin::hashes::Hash;
     let message_str = format!("get_quotes:{}", pubkey_hex);
     let message_hash = sha256::Hash::hash(message_str.as_bytes());
     let message = Message::from_digest(message_hash.to_byte_array());
-    let signature = secp.sign_schnorr(&message, &secret_key.keypair(&secp));
+    let signature = secp.sign_schnorr(&message, &secret_key_secp.keypair(&secp));
 
     // Fetch quote from server via get-quotes-by-pubkey endpoint
     #[derive(Serialize)]
@@ -115,40 +119,41 @@ pub async fn mint_ehash(
 
     println!("Found quote: {} {} (state: {})", server_quote.amount, server_quote.unit, server_quote.state);
 
-    // Create a MintQuote for proof_stream with Custom payment method
+    // Store the quote in wallet database with Custom payment method
     use cdk::nuts::{CurrencyUnit, MintQuoteState, PaymentMethod};
+    use cdk::wallet::MintQuote as WalletMintQuote;
     use std::str::FromStr;
 
-    let quote = cdk::wallet::MintQuote {
+    // Use the unit as returned from the server (lowercase "hash")
+    let unit = CurrencyUnit::from_str(&server_quote.unit)?;
+    eprintln!("DEBUG: Using unit: {:?}", unit);
+
+    let wallet_quote = WalletMintQuote {
         id: sub_command_args.quote_id.clone(),
         mint_url: mint_url.clone(),
         payment_method: PaymentMethod::Custom("HASH".to_string()),
         amount: Some(Amount::from(server_quote.amount)),
-        unit: CurrencyUnit::from_str(&server_quote.unit)?,
+        unit: unit.clone(),
         request: "eHash mining quote".to_string(),
         state: MintQuoteState::Paid,
         expiry: unix_time() + 86400,
-        secret_key: None,
+        secret_key: Some(secret_key.clone()),  // Store the eHash key for NUT-20 signing
         amount_issued: Amount::ZERO,
         amount_paid: Amount::from(server_quote.amount),
     };
 
+    wallet.localstore.add_mint_quote(wallet_quote).await?;
+
     println!("Minting {} {} from quote...", server_quote.amount, server_quote.unit);
 
-    // Use proof_stream which now supports Custom payment methods
-    let mut amount_minted = Amount::ZERO;
-    let mut proof_streams = wallet.proof_stream(quote, SplitTarget::default(), None);
+    // Call mint() directly instead of using proof_stream
+    let proofs = wallet.mint(
+        &sub_command_args.quote_id,
+        SplitTarget::default(),
+        None,
+    ).await?;
 
-    while let Some(proofs) = proof_streams.next().await {
-        let proofs = match proofs {
-            Ok(proofs) => proofs,
-            Err(err) => {
-                tracing::error!("Proof streams ended with {:?}", err);
-                break;
-            }
-        };
-        amount_minted += proofs.total_amount()?;
-    }
+    let amount_minted = proofs.total_amount()?;
 
     println!("\n✅ Successfully minted {} HASH tokens!", amount_minted);
     println!("Tokens have been added to your wallet.");

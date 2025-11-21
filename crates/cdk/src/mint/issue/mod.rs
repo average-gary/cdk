@@ -131,7 +131,12 @@ impl TryFrom<MintQuote> for MintQuoteResponse {
                 let bolt12_response = MintQuoteBolt12Response::try_from(quote)?;
                 Ok(MintQuoteResponse::Bolt12(bolt12_response))
             }
-            PaymentMethod::Custom(_) => Err(Error::InvalidPaymentMethod),
+            PaymentMethod::Custom(_) => {
+                // For custom payment methods (e.g., eHash), return a Bolt11-like response
+                // This allows the quote to be checked via the generic check_mint_quote method
+                let bolt11_response: MintQuoteBolt11Response<QuoteId> = quote.into();
+                Ok(MintQuoteResponse::Bolt11(bolt11_response))
+            }
         }
     }
 }
@@ -578,6 +583,8 @@ impl Mint {
                 self.check_mint_quote_paid(&mut quote).await?;
             }
 
+            // For custom payment methods (e.g., eHash), convert without checking payment status
+            // Custom quotes are marked as PAID when created by the pool
             quote.try_into()
         }
         .await;
@@ -684,7 +691,20 @@ impl Mint {
 
                 mint_quote.amount_mintable()
             }
-            _ => return Err(Error::UnsupportedPaymentMethod),
+            PaymentMethod::Custom(_) => {
+                // For custom payment methods (e.g., eHash), use amount_mintable
+                // These quotes are already marked as PAID when created
+                if mint_quote.amount_mintable() == Amount::ZERO {
+                    tracing::error!(
+                        "Quote state should not be issued if issued {} is => paid {}.",
+                        mint_quote.amount_issued(),
+                        mint_quote.amount_paid()
+                    );
+                    return Err(Error::UnpaidQuote);
+                }
+
+                mint_quote.amount_mintable()
+            }
         };
 
         // If the there is a public key provoided in mint quote request
